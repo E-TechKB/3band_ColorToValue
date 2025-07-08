@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>この色の乗数は？早押しゲーム</title>
+    <style>
+        /* (CSSは変更ありません) */
+        body { font-family: 'Helvetica', 'Arial', 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f0f0; color: #333; }
+        #game-container { width: 90%; max-width: 500px; background-color: #fff; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; text-align: center; position: relative; }
+        .screen { display: none; }
+        .screen.active { display: block; }
+        .btn { background-color: #007bff; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 18px; cursor: pointer; transition: background-color 0.3s; }
+        .btn:hover { background-color: #0056b3; }
+        h1 { color: #0056b3; }
+        h2 { color: #dc3545; }
+        #hud { display: flex; justify-content: space-between; font-size: 20px; font-weight: bold; margin-bottom: 20px; }
+        .resistor-container { display: flex; align-items: center; justify-content: center; margin: 40px 0; }
+        .lead { width: 50px; height: 2px; background-color: #888; }
+        .resistor-body { width: 200px; height: 60px; background-color: #f5deb3; border: 2px solid #d2b48c; border-radius: 10px; position: relative; display: flex; align-items: center; justify-content: center; gap: 15px; }
+        .band { width: 15px; height: 100%; }
+        #band4 { margin-left: 20px; }
+        #options-area { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        .option-btn { background-color: #6c757d; color: white; border: none; padding: 15px; border-radius: 8px; font-size: 18px; cursor: pointer; transition: all 0.2s; }
+        .option-btn:hover { opacity: 0.8; }
+        .option-btn.correct { background-color: #28a745 !important; }
+        .option-btn.wrong { background-color: #dc3545 !important; }
+        #countdown-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; height: 200px; background-color: rgba(255, 255, 255, 0.95); border-radius: 15px; z-index: 10; display: none; justify-content: center; align-items: center; }
+        #countdown-overlay.active { display: flex; }
+        #countdown-text { font-size: 100px; font-weight: bold; color: #007bff; }
+        #feedback { margin-top: 15px; font-size: 22px; font-weight: bold; height: 30px; }
+        #feedback.correct { color: #28a745; }
+        #feedback.wrong { color: #dc3545; }
+        #high-score-display { margin-top: 15px; font-size: 18px; color: #333; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="start-screen" class="screen active">
+            <h1>この色の乗数は？早押しゲーム</h1>
+            <p>1分間で何問正解できるかな？</p>
+            <div id="high-score-display">本日の最高得点: 0</div>
+            <button id="start-btn" class="btn">スタート</button>
+        </div>
+
+        <div id="game-screen" class="screen">
+            <div id="hud">
+                <div id="timer">時間: 60</div>
+                <div id="score">スコア: 0</div>
+            </div>
+            <div id="question-area">
+                <div class="resistor-container">
+                    <div class="lead"></div>
+                    <div class="resistor-body">
+                        <div class="band" id="band1"></div>
+                        <div class="band" id="band2"></div>
+                        <div class="band" id="band3"></div>
+                        <div class="band" id="band4"></div>
+                    </div>
+                    <div class="lead"></div>
+                </div>
+            </div>
+            <div id="options-area"></div>
+            <div id="feedback"></div>
+        </div>
+
+        <div id="countdown-overlay" class="screen">
+            <span id="countdown-text">3</span>
+        </div>
+
+        <div id="result-screen" class="screen">
+            <h2>タイムアップ！</h2>
+            <p id="final-score">あなたのスコア: 0</p>
+            <button id="restart-btn" class="btn">もう一度挑戦</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // (定数部分は変更ありません)
+            const COLORS = { black: { value: 0, multiplier: 1, code: '#000000' }, brown: { value: 1, multiplier: 10, code: '#a52a2a' }, red: { value: 2, multiplier: 100, code: '#ff0000' }, orange: { value: 3, multiplier: 1000, code: '#ffa500' }, yellow: { value: 4, multiplier: 10000, code: '#ffff00' }, green: { value: 5, multiplier: 100000, code: '#008000' }, blue: { value: 6, multiplier: 1000000, code: '#0000ff' }, violet: { value: 7, multiplier: 10000000, code: '#ee82ee' }, gold: { value: null, multiplier: 0.1, code: '#ffd700' }, silver: { value: null, multiplier: 0.01, code: '#c0c0c0' } };
+            const QUIZ_MULTIPLIERS = ['gold', 'black', 'brown', 'red', 'orange', 'yellow', 'green', 'blue'];
+            
+            // (DOM要素の取得にhigh-score-displayを追加)
+            const startScreen = document.getElementById('start-screen');
+            const gameScreen = document.getElementById('game-screen');
+            const resultScreen = document.getElementById('result-screen');
+            const countdownOverlay = document.getElementById('countdown-overlay');
+            const startBtn = document.getElementById('start-btn');
+            const restartBtn = document.getElementById('restart-btn');
+            const timerEl = document.getElementById('timer');
+            const scoreEl = document.getElementById('score');
+            const bands = [document.getElementById('band1'), document.getElementById('band2'), document.getElementById('band3'), document.getElementById('band4')];
+            const optionsArea = document.getElementById('options-area');
+            const feedbackEl = document.getElementById('feedback');
+            const countdownText = document.getElementById('countdown-text');
+            const finalScoreEl = document.getElementById('final-score');
+            const highScoreEl = document.getElementById('high-score-display'); // 追加
+            
+            // (ゲームの状態変数にhighScoreを追加)
+            let score = 0;
+            let highScore = 0; // 追加
+            let timeLeft = 60;
+            let timerId = null, countdownId = null, currentCorrectValue = '';
+
+            // ★【変更点1】ページ読み込み時に最高得点をlocalStorageから読み込む
+            function loadHighScore() {
+                const savedHighScore = localStorage.getItem('resistanceGameHighScore');
+                highScore = savedHighScore ? parseInt(savedHighScore, 10) : 0;
+                highScoreEl.textContent = `本日の最高得点: ${highScore}`;
+            }
+
+            // (イベントリスナーは変更ありません)
+            startBtn.addEventListener('click', startGame);
+            restartBtn.addEventListener('click', () => {
+                resultScreen.classList.remove('active');
+                startScreen.classList.add('active');
+            });
+            
+            // (ゲーム開始前の処理は変更ありません)
+            function startGame() {
+                startScreen.classList.remove('active');
+                countdownOverlay.classList.add('active');
+                let count = 3;
+                countdownText.textContent = count;
+                countdownId = setInterval(() => {
+                    count--;
+                    if (count > 0) {
+                        countdownText.textContent = count;
+                    } else {
+                        clearInterval(countdownId);
+                        countdownOverlay.classList.remove('active');
+                        runGame();
+                    }
+                }, 1000);
+            }
+            
+            // (ゲーム実行時の処理は変更ありません)
+            function runGame() {
+                gameScreen.classList.add('active');
+                score = 0; // スコアをリセット
+                scoreEl.textContent = `スコア: ${score}`;
+                timeLeft = 60;
+                timerEl.textContent = `時間: ${timeLeft}`;
+                generateQuestion();
+                timerId = setInterval(() => {
+                    timeLeft--;
+                    timerEl.textContent = `時間: ${timeLeft}`;
+                    if (timeLeft <= 0) { endGame(); }
+                }, 1000);
+            }
+
+            // (問題生成のロジックは変更ありません)
+            function generateQuestion() {
+                feedbackEl.textContent = '';
+                const c1 = 'brown', c2 = 'black', c4 = 'gold';
+                const c3 = QUIZ_MULTIPLIERS[Math.floor(Math.random() * QUIZ_MULTIPLIERS.length)];
+                bands[0].style.backgroundColor = COLORS[c1].code;
+                bands[1].style.backgroundColor = COLORS[c2].code;
+                bands[2].style.backgroundColor = COLORS[c3].code;
+                bands[3].style.backgroundColor = COLORS[c4].code;
+                const value = 10 * COLORS[c3].multiplier;
+                currentCorrectValue = formatResistance(value);
+                let allPossibleOptions = [...new Set(QUIZ_MULTIPLIERS.map(color => formatResistance(10 * COLORS[color].multiplier)))];
+                let options = [currentCorrectValue];
+                let otherOptions = allPossibleOptions.filter(opt => opt !== currentCorrectValue);
+                otherOptions.sort(() => Math.random() - 0.5);
+                while (options.length < 4 && otherOptions.length > 0) { options.push(otherOptions.shift()); }
+                options.sort(() => Math.random() - 0.5);
+                optionsArea.innerHTML = '';
+                options.forEach(option => {
+                    const button = document.createElement('button');
+                    button.className = 'option-btn';
+                    button.textContent = option;
+                    button.addEventListener('click', checkAnswer);
+                    optionsArea.appendChild(button);
+                });
+            }
+            
+            // (抵抗値のフォーマットは変更ありません)
+            function formatResistance(value) {
+                if (value >= 1000000) { const mValue = value / 1000000; return (mValue === 1 ? '1.0' : mValue.toString()) + 'MΩ'; }
+                if (value >= 1000) { const kValue = value / 1000; return (kValue === 1 ? '1.0' : kValue.toString()) + 'kΩ'; }
+                if (value === 1) { return '1.0Ω'; }
+                if (value < 10 && !Number.isInteger(value)) { return value.toFixed(1) + 'Ω'; }
+                return value.toString() + 'Ω';
+            }
+
+            // ★【変更点2】回答チェック時のスコア計算を変更
+            function checkAnswer(e) {
+                const selectedOption = e.target;
+                const isCorrect = selectedOption.textContent === currentCorrectValue;
+                document.querySelectorAll('.option-btn').forEach(btn => {
+                    btn.disabled = true;
+                    if (btn.textContent === currentCorrectValue) {
+                       btn.classList.add('correct');
+                    }
+                });
+
+                if (isCorrect) {
+                    score += 10; // 正解で+10点
+                    feedbackEl.textContent = "正解！";
+                    feedbackEl.className = 'correct';
+                } else {
+                    score = Math.max(0, score - 10); // 不正解で-10点 (0点未満にはならない)
+                    selectedOption.classList.add('wrong');
+                    feedbackEl.textContent = "不正解...";
+                    feedbackEl.className = 'wrong';
+                }
+                scoreEl.textContent = `スコア: ${score}`; // スコア表示を更新
+
+                setTimeout(() => { if (timeLeft > 0) { generateQuestion(); } }, 1000);
+            }
+
+            // ★【変更点3】ゲーム終了時に最高得点をチェック・保存
+            function endGame() {
+                clearInterval(timerId);
+                
+                // 最高得点を更新
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem('resistanceGameHighScore', highScore);
+                    highScoreEl.textContent = `本日の最高得点: ${highScore}`;
+                }
+
+                gameScreen.classList.remove('active');
+                resultScreen.classList.add('active');
+                finalScoreEl.textContent = `あなたのスコア: ${score}`;
+            }
+            
+            // ★【変更点4】初期化処理を実行
+            loadHighScore();
+        });
+    </script>
+</body>
+</html>
